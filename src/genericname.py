@@ -107,8 +107,6 @@ class _GenericArgsToClassVar:
 
         @functools.wraps(target_class.__init_subclass__)
         def __init_subclass__(subclass, /, **kwargs):  # type: ignore
-            print(f'__init_subclass__({subclass})')
-            #super(target_class, subclass).__init_subclass__(**kwargs)
             orig_init_subclass(**kwargs)
             if self._classes == 'this':
                 generic_args = get_generic_args_for_base(subclass, target_class)
@@ -119,20 +117,17 @@ class _GenericArgsToClassVar:
                                 f'via base class {target_class}: no template parameters found. '
                                 "If you think it's a bug, please report it: "
                                 "<https://github.com/alexanderlukanin13/generic-name/issues>")
-            print(f'generic_args = {generic_args}')
-            for attr, type_ in generic_args.items():
-                attr = self._format(attr)
-                print(f'attr = {attr!r}')
+            for typevar, type_ in generic_args.items():
+                attr = self._format(typevar)
                 if hasattr(subclass, attr):
                     existing_value = getattr(subclass, attr)
                     if existing_value is not type_:
                         raise ConflictingTypesError(
                             f'Conflicting types in class variable {subclass.__qualname__}.{attr}: '
-                            f'trying to assign {attr}={type_} from runtime generic arguments, '
+                            f'trying to assign {attr}={type_} from generic parameter {typevar}, '
                             f'but the variable already exists and has a distinct value {attr}={existing_value!r}')
                 else:
                     setattr(subclass, attr, type_)
-                    print(f"setattr({subclass}, {attr}, {type_})")
 
         target_class.__init_subclass__ = classmethod(__init_subclass__)
         return target_class
@@ -157,7 +152,6 @@ def generic_args_to_classvar(
 
     This decorator can be used with or without brackets.
     """
-    print('generic_args_to_classvar')
     _ = _GenericArgsToClassVar(classes=classes, classvar_name_format=classvar_name_format)
     if _decorated_class is None:  # with brackets - not decorating yet
         return _
