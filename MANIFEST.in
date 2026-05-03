@@ -1,0 +1,14 @@
+include HISTORY.rst
+include LICENSE
+include README.rst
+include *.rst
+
+exclude MANIFEST.in
+exclude .*
+exclude tox.ini
+exclude mypy.ini
+recursive-exclude tests *
+recursive-exclude requirements *
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+recursive-exclude .* *

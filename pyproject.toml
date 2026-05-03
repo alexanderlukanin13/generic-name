@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools==80.10.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "generic-name"
+version = "0.1.0"
+description = "Get names and runtime types of generic args for any class. Assign types to ClassVar automatically via class decorator."
+requires-python = ">= 3.10"
+dependencies = []
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Alexander Lukanin", email = "alexander.lukanin.13@gmail.com"}]
+readme = "README.rst"
+classifiers = [
+    'Development Status :: 3 - Alpha',
+    'Programming Language :: Python',
+]
+
+[project.urls]
+Homepage = "https://github.com/alexanderlukanin13/generic-name"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
