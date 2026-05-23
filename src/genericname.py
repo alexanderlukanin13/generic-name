@@ -12,9 +12,10 @@ __all__ = ['get_generic_args', 'get_generic_args_for_base', 'generic_args_to_cla
 
 def get_generic_args(cls: type) -> Iterable[tuple[type, str, type]]:
     """
-    Returns all generic args of this class hierarchy as a sequence of tuples:
+    Returns all generic args of this class and all its superclasses
+    as a sequence of tuples:
     `(GenericClass: type, TypeVarName: str, RuntimeClass: type)`, where
-    `GenericClass` is a class in hierarchy where `TypeVarName`
+    `GenericClass` is a class in hierarchy in which `TypeVarName`
     becomes `RuntimeClass`.
     """
     # From get_original_bases documentation (python >= 3.12):
@@ -74,6 +75,7 @@ def get_all_unique_generic_args(cls: type) -> dict[str, type]:
                                         f'{typevar_name}={runtime_class} in {base_class}. '
                                         f'Either change your TypeVar names, class hierarchy, or switch to '
                                         f'single-class functions: generic_args_to_classvar, get_generic_args_for_base')
+    return result
 
 
 class _GenericArgsToClassVar:
@@ -103,11 +105,18 @@ class _GenericArgsToClassVar:
                              f"or a single-argument callable converting str to str")
 
     def __call__(self, target_class, /):
-        orig_init_subclass = target_class.__init_subclass__
+        try:
+            orig_init_subclass = target_class.__init_subclass__.__func__
+        except AttributeError:
+            orig_init_subclass = None
 
         @functools.wraps(target_class.__init_subclass__)
         def __init_subclass__(subclass, /, **kwargs):  # type: ignore
-            orig_init_subclass(**kwargs)
+            print(f'[{target_class}] @ __init_subclass__({subclass})')
+            if orig_init_subclass is None:
+                super(target_class, subclass).__init_subclass__(**kwargs)
+            else:
+                orig_init_subclass(subclass, **kwargs)
             if self._classes == 'this':
                 generic_args = get_generic_args_for_base(subclass, target_class)
             else:
