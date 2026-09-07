@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "generic-name"
 version = "0.1.0"
-description = "Get names and runtime types of generic args for any class. Assign types to ClassVar automatically via class decorator."
+description = "Get runtime class of generic parameter T, create an instance, use it without knowing it - with just one decorator."
 requires-python = ">= 3.10"
 dependencies = []
 license = "MIT"

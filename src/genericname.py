@@ -1,5 +1,8 @@
+import contextlib
 import functools
 import sys
+import collections as coll
+import collections.abc as cabc
 from collections.abc import Iterable
 from itertools import repeat
 import types
@@ -7,10 +10,21 @@ import typing
 
 __version__ = '0.1.0'
 __version_tuple__ = (0, 1, 0)
-__all__ = ['get_generic_args', 'get_generic_args_for_base', 'generic_args_to_classvar']
+__all__ = ['iter_generic_args', 'get_generic_args',
+           'get_generic_args_for_base',
+           'get_generic_args_for_subclasses', 'generic_args_to_classvar']
 
 
-def get_generic_args(cls: type) -> Iterable[tuple[type, str, type]]:
+class GenericArg(typing.NamedTuple):
+    cls: type            # class where typevar_name becomes runtime_class
+    parameter: str       # type parameter (TypeVar name)
+    argument: type       #
+
+
+def get_generic_args(cls: type) -> list[tuple[type, str, type]]:
+    return list(iter_generic_args(cls))
+
+def iter_generic_args(cls: type) -> Iterable[tuple[type, str, type]]:
     """
     Returns all generic args of this class and all its superclasses
     as a sequence of tuples:
@@ -21,6 +35,7 @@ def get_generic_args(cls: type) -> Iterable[tuple[type, str, type]]:
     # From get_original_bases documentation (python >= 3.12):
     # For classes that have an __orig_bases__ attribute, this function returns the value of cls.__orig_bases__.
     # For classes without the __orig_bases__ attribute, cls.__bases__ is returned.
+    print(f'get_generic_args({cls!r}')
     if sys.version_info >= (3, 12):
         orig_bases = types.get_original_bases(cls)  # could be less fragile?
     else:
@@ -31,12 +46,58 @@ def get_generic_args(cls: type) -> Iterable[tuple[type, str, type]]:
     for orig_base in orig_bases:
         # get_origin returns None for runtime classes, original class for generics
         base = typing.get_origin(orig_base)
-        if base is None:  # real class without parameters - let's descend
-            yield from get_generic_args(orig_base)
+        if base is None:  # real class without parameters
+            yield from iter_generic_args(orig_base)
         else:  # generic
-            parameters = [x.__name__ for x in getattr(base, '__parameters__', [])]
+            assert isinstance(base, type)
+            yield from iter_generic_args(base)
+            parameters = get_generic_parameters(base)
+            if parameters:
+                print(f'!!! parameters for from base class {base}')
             args = [x for x in typing.get_args(orig_base) ]
-            yield from (x for x in zip(repeat(base), parameters, args) if type(x[2]) is type)
+            print(f'{base!r} parameters = {parameters!r}') # TODO REMOVE_THIS
+            print(f'{orig_base!r} args = {args!r}')  # TODO REMOVE_THIS
+            print()
+            yield from (x for x in zip(repeat(cls), parameters, args) if type(x[2]) is type)
+
+
+def get_generic_parameters(t: type) -> list[str]:
+    # For generic type, return __parameters__
+    parameters = [x.__name__ for x in getattr(t, '__parameters__', [])]
+    if parameters:
+        return parameters
+    # For particular builtins and standard library types, return parameter names as in docs
+    if t.__module__ not in ('builtins', 'collections', 'collections.abc', 'contextlib'):
+        return []
+    _t_co_types = [
+        list, set, frozenset,
+        cabc.Collection, cabc.Sequence, cabc.MutableSequence, cabc.Container,
+        cabc.Iterable, cabc.Iterator, cabc.Reversible, cabc.Set, cabc.MutableSet,
+        coll.deque, coll.Counter
+    ]
+    if any(t is x for x in _t_co_types):
+        return ['T_co']
+    if t is cabc.KeysView:
+        return ['KT_co']
+    if t is cabc.ValuesView:
+        return ['VT_co']
+    _dict_types = [
+        dict,
+        cabc.Mapping, cabc.MutableMapping, cabc.MappingView,
+        coll.ChainMap, coll.defaultdict, coll.OrderedDict
+    ]
+    if any(t is x for x in _dict_types):
+        return ['KT_co', 'VT_co']
+    if t is contextlib.AbstractContextManager:
+        return ['T_co', 'ExitT_co']
+    if t is contextlib.AbstractAsyncContextManager:
+        return ['T_co', 'AExitT_co']
+    # NOTE: following types are explicitly *not* supported:
+    # Callable, Awaitable, Coroutine, Generator, AsyncGenerator
+    return []
+
+class C(coll.Counter[int, str, float]):
+    pass
 
 
 def get_generic_args_for_base(cls: type, base_cls: type) -> dict[str, type]:
@@ -46,13 +107,40 @@ def get_generic_args_for_base(cls: type, base_cls: type) -> dict[str, type]:
 
     All other classes and their template parameters are ignored.
     """
+    parameters = get_generic_parameters(base_cls)
+    if not parameters:
+        raise NoGenericArgsError(f'Class {base_cls.__qualname__} has no generic parameters')
     return {
         typevar_name: runtime_class
-        for (x, typevar_name, runtime_class) in get_generic_args(cls) if x is base_cls
+        for (x, typevar_name, runtime_class) in iter_generic_args(cls) if typevar_name in parameters
+    }
+
+def get_generic_args_for_subclasses(cls: type, base_cls: type) -> dict[str, type]:
+    """
+    Similar to `get_generic_args_for_base`, but returns `{TypeVarName: RuntimeClass}`
+    subset for the target base class and all of its subclasses.
+
+    All other classes and their template parameters are ignored.
+    """
+    parameters = set(get_generic_parameters(base_cls))
+    if not parameters:
+        raise NoGenericArgsError(f'Class {base_cls.__qualname__} has no generic parameters')
+    for x in cls.__mro__:
+        if issubclass(x, base_cls):
+            parameters.update(get_generic_parameters(x))
+            print(f'  {x.__qualname__} -> {get_generic_parameters(x)}')
+    return {
+        typevar_name: runtime_class
+        for (x, typevar_name, runtime_class) in iter_generic_args(cls)
+        if typevar_name in parameters and issubclass(x, base_cls)
     }
 
 
 class ConflictingTypesError(TypeError):
+    pass
+
+
+class NoGenericArgsError(TypeError):
     pass
 
 
@@ -66,7 +154,7 @@ def get_all_unique_generic_args(cls: type) -> dict[str, type]:
     """
     result: dict[str, type] = {}
     bases_classes: dict[str, type] = {}
-    for base_class, typevar_name, runtime_class in get_generic_args(cls):
+    for base_class, typevar_name, runtime_class in iter_generic_args(cls):
         if typevar_name in result:
             if result[typevar_name] is runtime_class:
                 continue  # normal situation, just complex inheritance
@@ -75,22 +163,23 @@ def get_all_unique_generic_args(cls: type) -> dict[str, type]:
                                         f'{typevar_name}={runtime_class} in {base_class}. '
                                         f'Either change your TypeVar names, class hierarchy, or switch to '
                                         f'single-class functions: generic_args_to_classvar, get_generic_args_for_base')
+        result[typevar_name] = runtime_class
     return result
 
 
 class _GenericArgsToClassVar:
 
     def __init__(self, *,
-                 classes: typing.Literal['this', 'all'],
+                 classes: typing.Literal['this', 'subclasses', 'all'],
                  classvar_name_format: str | typing.Callable[[str], str]
                  ):
         # Let's test arguments carefully. Fail early, fail cheap!
         if not isinstance(classes, str):
             raise TypeError(f"generic_args_to_classvar(classes=...) argument: "
                             f"expected str, got {classes.__class__.__qualname__}")
-        if classes not in ('this', 'all'):
+        if classes not in ('this', 'all', 'subclasses'):
             raise ValueError(f"generic_args_to_classvar(classes=...) argument: "
-                             f"expected 'this' or 'all', got {classes!r}")
+                             f"expected ['this', 'subclasses', 'all'], got {classes!r}")
         self._classes = classes
 
         if isinstance(classvar_name_format, str):
@@ -119,8 +208,14 @@ class _GenericArgsToClassVar:
                 orig_init_subclass(subclass, **kwargs)
             if self._classes == 'this':
                 generic_args = get_generic_args_for_base(subclass, target_class)
-            else:
+                print(f'get_generic_args_for_base({subclass}, {target_class}) = {generic_args!r}')
+            elif self._classes == 'subclasses':
+                generic_args = get_generic_args_for_subclasses(subclass, target_class)
+            elif self._classes == 'all':
                 generic_args = get_all_unique_generic_args(subclass)
+                print(f'get_all_unique_generic_args({subclass}) = {generic_args!r}')
+            else:
+                raise ValueError(f"Unexpected 'classes' argument: {self._classes!r}")
             if not generic_args:
                 raise TypeError(f'Failed to apply @generic_args_to_classvar to {subclass} '
                                 f'via base class {target_class}: no template parameters found. '
@@ -144,7 +239,7 @@ class _GenericArgsToClassVar:
 
 def generic_args_to_classvar(
         _decorated_class: type | None = None, /, *,
-        classes: typing.Literal['this', 'all'] = 'this',
+        classes: typing.Literal['this', 'subclasses', 'all'] = 'this',
         classvar_name_format: str | typing.Callable[[str], str]= '_{}'):
     """
     Class decorator that automatically assigns runtime generic argument types
